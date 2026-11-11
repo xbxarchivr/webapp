@@ -1,0 +1,67 @@
+name: Roblox WebClient Release
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: roblox-webclient
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get client version
+        id: version
+        run: |
+          json=$(curl -fsSL --retry 3 https://clientsettings.roblox.com/v2/client-version/WebClientApp)
+          echo "version=$(jq -r '.version' <<<"$json")" >> "$GITHUB_OUTPUT"
+          echo "upload=$(jq -r '.clientVersionUpload' <<<"$json")" >> "$GITHUB_OUTPUT"
+
+      - name: Check for existing release
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.upload }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download files
+        if: steps.check.outputs.exists == 'false'
+        env:
+          BASE: https://setup.rbxcdn.com/webclient/${{ steps.version.outputs.upload }}-RobloxWebClient
+        run: |
+          mkdir -p WebClient
+          curl -fsSL --retry 3 "$BASE/WebClient.metadata.json" -o WebClient/WebClient.metadata.json
+          jq -r '.. | objects | select(has("path")) | .path' WebClient/WebClient.metadata.json > paths.txt
+          echo "Files: $(wc -l < paths.txt)"
+          xargs -d '\n' -P 16 -n 1 sh -c 'curl -fsSL --retry 5 --retry-delay 2 --create-dirs -o "WebClient$1" "$BASE$(printf %s "$1" | sed "s/ /%20/g")"' _ < paths.txt
+
+      - name: Create zip
+        if: steps.check.outputs.exists == 'false'
+        env:
+          TAG: ${{ steps.version.outputs.upload }}
+        run: |
+          cd WebClient
+          zip -qr "../WebClient-$TAG.zip" .
+
+      - name: Publish release
+        if: steps.check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.upload }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          gh release create "$TAG" "WebClient-$TAG.zip" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$VERSION ($TAG)" \
+            --notes "Roblox WebClient $VERSION ($TAG)"
