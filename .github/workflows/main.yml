@@ -41,7 +41,9 @@ jobs:
           BASE: https://setup.rbxcdn.com/webclient/${{ steps.version.outputs.upload }}-RobloxWebClient
         run: |
           mkdir -p WebClient
-          curl -fsSL --retry 3 "$BASE/WebClient.metadata.json" -o WebClient/WebClient.metadata.json
+          for f in WasmPlayer.js WebClient.js WebClient.metadata.json WebClient.wasm WebFlags.json; do
+            curl -fsSL --retry 5 --retry-delay 2 "$BASE/$f" -o "WebClient/$f"
+          done
           jq -r '.. | objects | select(has("path")) | .path' WebClient/WebClient.metadata.json > paths.txt
           echo "Files: $(wc -l < paths.txt)"
           xargs -d '\n' -P 16 -n 1 sh -c 'curl -fsSL --retry 5 --retry-delay 2 --create-dirs -o "WebClient$1" "$BASE$(printf %s "$1" | sed "s/ /%20/g")"' _ < paths.txt
